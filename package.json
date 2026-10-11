@@ -1,0 +1,31 @@
+{
+  "name": "easygeo",
+  "productName": "EasyGeo",
+  "version": "0.2.0",
+  "description": "Géométrie dynamique moderne avec assistant IA",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "app": "vite build && electron .",
+    "dist:lite": "tsc --noEmit && vite build && electron-builder --config electron-builder.lite.json"
+  },
+  "dependencies": {
+    "mathjs": "^15.2.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  },
+  "author": "Kane"
+}
