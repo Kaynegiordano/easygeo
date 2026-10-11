@@ -6,8 +6,8 @@ import { CanvasView } from './CanvasView';
 import { Sidebar } from './Sidebar';
 import { AiPanel } from './AiPanel';
 import { Icon } from './icons';
-import { buildMenu, ContextMenu, labelPrompt, primaryEdit, type MenuItem, type PromptSpec } from './ContextMenu';
-import { DEFAULT_MEASURES, type MeasureOpts } from './engine/labels';
+import { buildMenu, ContextMenu, labelPrompt, primaryEdit, type EdgePick, type MenuItem, type PromptSpec } from './ContextMenu';
+import { collectMeasures, DEFAULT_MEASURES, type MeasureOpts } from './engine/labels';
 import { alternatives, applyShape, recognize, type Shape, type ShapeKind } from './engine/sketch';
 import type { Vec } from './engine/geom';
 
@@ -47,6 +47,8 @@ export function App() {
   /** Petite saisie (rayon, longueur, angle…) affichée près du curseur ou en haut du dessin. */
   const [ask, setAsk] = useState<(PromptSpec & { x?: number; y?: number }) | null>(null);
   const [menu2, setMenu2] = useState<{ x: number; y: number; title: string; items: MenuItem[] } | null>(null);
+  /** Mode « clique sur un côté » (même longueur que…). */
+  const [edgePick, setEdgePick] = useState<EdgePick | null>(null);
   const [sketch, setSketch] = useState<{ summary: string; stroke: Vec[]; shape: Shape } | null>(null);
   const [cancelToken, setCancelToken] = useState(0);
   const undo = useRef<Snapshot[]>([]);
@@ -97,7 +99,7 @@ export function App() {
       if (e.ctrlKey && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
       else if (e.ctrlKey && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); doRedo(); }
       else if (e.key === 'Escape') {
-        if (ask || menu2) { setAsk(null); setMenu2(null); return; }
+        if (ask || menu2 || edgePick) { setAsk(null); setMenu2(null); setEdgePick(null); return; }
         setCancelToken((n) => n + 1); setToolId('move');
       }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selected && !typing) {
@@ -204,6 +206,13 @@ export function App() {
 
   const hint = tool.hints[Math.min(pendingCount, tool.hints.length - 1)];
 
+  // Accès pour les tests automatiques (activé par localStorage « easygeo.debug » = 1).
+  try {
+    if (localStorage.getItem('easygeo.debug') === '1') {
+      (window as unknown as Record<string, unknown>).__easygeo = { c, vp, labels: () => collectMeasures(c, vp, prefs.measures) };
+    }
+  } catch { /* stockage indisponible */ }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -257,6 +266,12 @@ export function App() {
             selected={selected} onSelect={setSelected} commit={commit}
             onAsk={toolAsk}
             measures={prefs.measures}
+            edgePick={edgePick ? (edge) => {
+              const spec = edgePick;
+              setEdgePick(null);
+              if (!edge) { setToast('Il faut cliquer sur un côté (un segment ou un côté de polygone).'); return; }
+              act(() => spec.apply(edge));
+            } : null}
             onEditLabel={(l, at) => { setMenu2(null); openPrompt(labelPrompt(c, l, prefs.measures.unit), at); }}
             onPending={setPendingCount} onError={setToast} cancelToken={cancelToken}
             onContext={(info) => { setAsk(null); setMenu2({ x: info.client.x, y: info.client.y, ...buildMenu(c, info) }); }}
@@ -266,7 +281,9 @@ export function App() {
               else setMenu2({ x: info.client.x, y: info.client.y, ...buildMenu(c, info) });
             }}
             onSketch={(summary, stroke, shape) => setSketch({ summary, stroke, shape })} />
-          <div className="hint"><b>{tool.label}</b><span>{hint}</span></div>
+          <div className="hint">
+            {edgePick ? <><b>Côtés égaux</b><span>{edgePick.hint} (Échap pour annuler)</span></> : <><b>{tool.label}</b><span>{hint}</span></>}
+          </div>
           {toast && <div className="toast">{toast}</div>}
           {sketch && !toast && (
             <div className="sketch-bar">
@@ -281,7 +298,8 @@ export function App() {
           {menu2 && (
             <ContextMenu {...menu2} onClose={() => setMenu2(null)}
               onRun={(fn) => act(fn)}
-              onPrompt={(p) => openPrompt(p, { x: menu2.x, y: menu2.y })} />
+              onPrompt={(p) => openPrompt(p, { x: menu2.x, y: menu2.y })}
+              onPickEdge={(p) => setEdgePick(p)} />
           )}
           <div className="zoom">
             <button className={`icon-btn ${prefs.grid ? 'on' : ''}`} data-tip="Grille" onClick={() => setPref('grid', !prefs.grid)}><Icon name="grid" size={18} /></button>

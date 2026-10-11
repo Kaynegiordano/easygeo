@@ -32,6 +32,13 @@ Préparer `tools/lite/ai/` : télécharger `llama-bXXXX-bin-win-cpu-x64.zip` (gi
 `llama-server.exe` + les `.dll`, ajouter le modèle sous le nom `model-light.gguf`
 (`unsloth/Qwen3-1.7B-GGUF`, fichier `Qwen3-1.7B-Q4_K_M.gguf`).
 
+## Mesures imposées (solveur de contraintes)
+
+Une valeur saisie sur la figure (clic sur « 4,5 cm » ou « 63° ») est **imposée** : elle s'affiche dans une pastille et reste vraie
+quand on règle les autres côtés ou qu'on déplace des points (`src/engine/solve.ts`, Gauss-Newton à correction minimale avec masses).
+Clic droit sur la valeur : modifier, libérer, « même longueur qu'un autre côté… ». Un réglage impossible (inégalité triangulaire)
+est refusé sans rien modifier. Seuls les points libres sont déplacés ; un verrou sur un point construit n'est pas pris en charge.
+
 ## Dessin à main levée
 
 Outil « Main levée » (crayon) : un tracé est reconnu par calcul (`src/engine/sketch.ts`) → point, segment, ligne brisée, polygone ou cercle.

@@ -43,6 +43,7 @@ export function defToCommand(c: Construction, o: GeoObject): string {
     case 'slider': return `Curseur(${fmt(d.min)}, ${fmt(d.max)})`;
     case 'distance': return `Distance(${n(d.a)}, ${n(d.b)})`;
     case 'angle': return `Angle(${n(d.a)}, ${n(d.b)}, ${n(d.c)})`;
+    case 'lock': return '';
   }
 }
 

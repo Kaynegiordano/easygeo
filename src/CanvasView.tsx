@@ -6,6 +6,7 @@ import { accepts, type Tool } from './engine/tools';
 import * as G from './engine/geom';
 import { applyShape, recognize, type Shape } from './engine/sketch';
 import { nearestEdge } from './engine/edit';
+import { lockedPointIds, moveFreePoint } from './engine/solve';
 import type { PickInfo } from './ContextMenu';
 import { collectMeasures, hitMeasure, type MeasureOpts, type MLabel } from './engine/labels';
 import type { Vec } from './engine/geom';
@@ -31,6 +32,8 @@ interface Props {
   measures: MeasureOpts;
   /** Clic sur une valeur écrite sur la figure (longueur, angle) : la modifier. */
   onEditLabel: (label: MLabel, client: Vec) => void;
+  /** Mode « choisis un côté » (pour « même longueur que… ») : reçoit le côté cliqué, ou null. */
+  edgePick: ((edge: [string, string] | null) => void) | null;
   /** Clic droit sans glisser. */
   onContext: (info: PickInfo) => void;
   /** Double-clic sur un objet. */
@@ -142,7 +145,8 @@ export function CanvasView(p: Props) {
         if (ed && (!hit || c.get(hit)?.type === 'polygon')) { edge = ed; hit = o.id; break; }
       }
     }
-    return { client: { x: e.clientX, y: e.clientY }, world: w, hit, edge };
+    const label = hitMeasure(collectMeasures(c, vp, props.current.measures), s) ?? undefined;
+    return { client: { x: e.clientX, y: e.clientY }, world: w, hit, edge, label };
   };
 
   // Redessine à chaque changement de figure, de réglage ou de thème.
@@ -242,6 +246,14 @@ export function CanvasView(p: Props) {
     const hits = hitTest(c, vp, s);
     const S = st.current;
 
+    // Mode « choisis un côté » : le prochain clic désigne un segment ou un côté de polygone.
+    if (props.current.edgePick && e.button === 0) {
+      const info = pick(e);
+      const o = info.hit ? c.get(info.hit) : undefined;
+      const seg: [string, string] | undefined = info.edge ?? (o?.def.k === 'segment' ? [o.def.a, o.def.b] : undefined);
+      props.current.edgePick(seg ?? null);
+      return;
+    }
     // Clic droit : menu s'il n'y a pas de glissement (décidé au relâchement) ; sinon déplacement de la vue.
     if (e.button === 1 || e.button === 2) { S.drag = { kind: 'pan', last: s, start: s, moved: false, right: e.button === 2 }; return; }
 
@@ -311,8 +323,10 @@ export function CanvasView(p: Props) {
       const o = c.get(d.id)!;
       const w = vp.toWorld(s);
       if (o.def.k === 'free') {
-        const q = e.shiftKey ? w : snapWorld(w);
-        o.def.x = q.x; o.def.y = q.y;
+        // Un point soumis à des mesures imposées suit la souris sans aimantation ; les autres s'adaptent.
+        const bound = lockedPointIds(c).includes(o.id);
+        const q = e.shiftKey || bound ? w : snapWorld(w);
+        moveFreePoint(c, o.id, q);
       } else if (o.def.k === 'on') {
         const k = c.comp(o.def.o);
         if (k?.line) o.def.t = G.projT(k.line, w);
@@ -343,7 +357,7 @@ export function CanvasView(p: Props) {
       S.hover = h;
       const lab = tool.id === 'move' || tool.id === 'freehand' ? hitMeasure(collectMeasures(c, vp, props.current.measures), s) : null;
       S.hoverLabel = lab?.key ?? null;
-      canvasRef.current!.style.cursor = lab ? 'text' : tool.id === 'move' ? (h ? 'grab' : 'default') : tool.id === 'delete' ? (h ? 'pointer' : 'default') : 'crosshair';
+      canvasRef.current!.style.cursor = props.current.edgePick ? 'crosshair' : lab ? 'text' : tool.id === 'move' ? (h ? 'grab' : 'default') : tool.id === 'delete' ? (h ? 'pointer' : 'default') : 'crosshair';
     }
     requestDraw();
   };

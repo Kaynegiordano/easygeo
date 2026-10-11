@@ -26,7 +26,11 @@ export type Def =
   | { k: 'function'; expr: string }
   | { k: 'slider'; value: number; min: number; max: number; step: number }
   | { k: 'distance'; a: string; b: string }
-  | { k: 'angle'; a: string; b: string; c: string };
+  | { k: 'angle'; a: string; b: string; c: string }
+  /** Mesure imposée par l'utilisateur : tenue en permanence par le solveur (voir solve.ts). */
+  | { k: 'lock'; kind: 'len'; a: string; b: string; value: number }
+  | { k: 'lock'; kind: 'ang'; p: string; v: string; n: string; value: number }
+  | { k: 'lock'; kind: 'eq'; a: string; b: string; c: string; d: string };
 
 export interface GeoObject {
   id: string;
@@ -56,7 +60,7 @@ const TYPE_OF: Record<Def['k'], ObjType> = {
   segment: 'line', line: 'line', ray: 'line', perp: 'line', parallel: 'line',
   bisector: 'line', angleBisector: 'line',
   circle2: 'circle', circleR: 'circle', polygon: 'polygon', function: 'function',
-  slider: 'number', distance: 'number', angle: 'number',
+  slider: 'number', distance: 'number', angle: 'number', lock: 'number',
 };
 
 export const PALETTE = {
@@ -86,6 +90,7 @@ export function refs(d: Def): string[] {
     case 'rotate': return [d.p, d.c];
     case 'perp': case 'parallel': return [d.p, d.l];
     case 'angleBisector': case 'angle': return [d.a, d.b, d.c];
+    case 'lock': return d.kind === 'len' ? [d.a, d.b] : d.kind === 'ang' ? [d.p, d.v, d.n] : [d.a, d.b, d.c, d.d];
     case 'circle2': return [d.c, d.p];
     case 'circleR': return [d.c];
     case 'polygon': return d.pts;
@@ -342,6 +347,7 @@ export class Construction {
         const value = G.angleDeg(a, b, c);
         return Number.isFinite(value) ? { value, angle: { a, b, c } } : undefined;
       }
+      case 'lock': return undefined; // contrainte : n'a pas de valeur propre, elle agit sur les points libres
     }
   }
 

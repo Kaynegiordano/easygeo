@@ -2,7 +2,8 @@
 import { useEffect, useRef } from 'react';
 import { COLORS, type Construction } from './engine/construction';
 import { displayName } from './engine/describe';
-import { parseNumber, setAngle, setCoords, setLength, setRadius, vertexOf } from './engine/edit';
+import { parseNumber, releaseLock, setAngle, setCoords, setEqualLength, setLength, setRadius, vertexOf } from './engine/edit';
+import { findLenLock } from './engine/solve';
 import * as G from './engine/geom';
 import type { Vec } from './engine/geom';
 import type { MLabel } from './engine/labels';
@@ -15,7 +16,12 @@ export interface PickInfo {
   hit: string | null;
   /** Côté de polygone visé, s'il y en a un. */
   edge?: [string, string];
+  /** Valeur écrite sur la figure (longueur, angle) visée par le clic. */
+  label?: MLabel;
 }
+
+/** Choix d'un second côté : l'application passe en mode « clique sur un côté ». */
+export interface EdgePick { hint: string; apply: (edge: [string, string]) => void }
 
 export interface PromptSpec { label: string; value: string; suffix?: string; apply: (v: string) => void }
 
@@ -25,6 +31,8 @@ export interface MenuItem {
   run?: () => void;
   /** Ouvre une petite saisie. */
   prompt?: PromptSpec;
+  /** Demande de cliquer sur un autre côté. */
+  pickEdge?: EdgePick;
   /** Ligne de pastilles de couleur. */
   colors?: (color: string) => void;
   danger?: boolean;
@@ -52,13 +60,26 @@ export function labelPrompt(c: Construction, l: MLabel, unit: boolean): PromptSp
   };
 }
 
+/** « Même longueur qu'un autre côté » : proposé quand les extrémités sont libres. */
+function equalItem(c: Construction, a: string, b: string): MenuItem[] {
+  if (![a, b].every((id) => c.get(id)?.def.k === 'free')) return [];
+  const name = `[${c.nameOf(a)}${c.nameOf(b)}]`;
+  return [{
+    label: 'Même longueur qu’un autre côté…',
+    pickEdge: { hint: `Clique sur le côté qui doit avoir la même longueur que ${name}`, apply: ([x, y]) => setEqualLength(c, a, b, x, y) },
+  }];
+}
+
 function segmentItems(c: Construction, a: string, b: string): MenuItem[] {
   const A = c.comp(a)?.pt, B = c.comp(b)?.pt;
   if (!A || !B) return [];
   const name = `[${c.nameOf(a)}${c.nameOf(b)}]`;
   const hasDist = c.objects.some((o) => o.def.k === 'distance' && ((o.def.a === a && o.def.b === b) || (o.def.a === b && o.def.b === a)));
+  const lock = findLenLock(c, a, b);
   return [
     { label: `Longueur de ${name}…`, prompt: { label: `Longueur de ${name}`, value: f(G.dist(A, B)), apply: (v) => setLength(c, a, b, num(v)) } },
+    ...(lock ? [{ label: 'Libérer la longueur (elle pourra varier)', run: () => releaseLock(c, lock.id) }] : []),
+    ...equalItem(c, a, b),
     ...(hasDist ? [] : [{ label: 'Afficher la longueur', run: () => { c.add({ k: 'distance', a, b }); } }]),
     { label: 'Placer le milieu', run: () => { c.add({ k: 'midpoint', a, b }); } },
     { label: 'Tracer la médiatrice', run: () => { c.add({ k: 'bisector', a, b }); } },
@@ -77,7 +98,17 @@ function common(c: Construction, id: string): MenuItem[] {
   ];
 }
 
+/** Menu d'une valeur écrite sur la figure (clic droit sur « 4,5 cm » ou « 63° »). */
+function labelMenu(c: Construction, l: MLabel): { title: string; items: MenuItem[] } {
+  const items: MenuItem[] = [{ label: 'Modifier la valeur…', prompt: labelPrompt(c, l, true) }];
+  if (l.lockId) items.push({ label: 'Libérer (la valeur pourra de nouveau varier)', run: () => releaseLock(c, l.lockId!) });
+  if (l.kind === 'len') items.push(...equalItem(c, l.a, l.b));
+  const title = l.kind === 'len' ? `Longueur [${c.nameOf(l.a)}${c.nameOf(l.b)}]${l.lockId ? ' — imposée' : ''}` : `Angle ${c.nameOf(l.p)}${c.nameOf(l.v)}${c.nameOf(l.n)}${l.lockId ? ' — imposé' : ''}`;
+  return { title, items };
+}
+
 export function buildMenu(c: Construction, info: PickInfo): { title: string; items: MenuItem[] } {
+  if (info.label) return labelMenu(c, info.label);
   const { hit, edge } = info;
   if (!hit && !edge) {
     return {
@@ -171,9 +202,9 @@ export function primaryEdit(c: Construction, info: PickInfo): PromptSpec | null 
   return items.find((i) => i.prompt)?.prompt ?? null;
 }
 
-export function ContextMenu({ x, y, title, items, onRun, onPrompt, onClose }: {
+export function ContextMenu({ x, y, title, items, onRun, onPrompt, onPickEdge, onClose }: {
   x: number; y: number; title: string; items: MenuItem[];
-  onRun: (fn: () => void) => void; onPrompt: (p: PromptSpec) => void; onClose: () => void;
+  onRun: (fn: () => void) => void; onPrompt: (p: PromptSpec) => void; onPickEdge: (p: EdgePick) => void; onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -198,6 +229,7 @@ export function ContextMenu({ x, y, title, items, onRun, onPrompt, onClose }: {
         <button key={i} className={it.danger ? 'danger' : ''} onClick={() => {
           onClose();
           if (it.prompt) onPrompt(it.prompt);
+          else if (it.pickEdge) onPickEdge(it.pickEdge);
           else if (it.run) onRun(it.run);
         }}>{it.label}</button>
       ))}

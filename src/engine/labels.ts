@@ -5,12 +5,14 @@ import type { Construction } from './construction';
 import * as G from './geom';
 import type { Vec } from './geom';
 import type { Theme, Viewport } from './render';
+import { lockObjects } from './solve';
 
 export interface MeasureOpts { lengths: boolean; angles: boolean; marks: boolean; unit: boolean }
 export const DEFAULT_MEASURES: MeasureOpts = { lengths: true, angles: true, marks: true, unit: true };
 
-export interface LenLabel { kind: 'len'; key: string; a: string; b: string; value: number; text: string; pos: Vec; w: number }
-export interface AngLabel { kind: 'ang'; key: string; p: string; v: string; n: string; value: number; text: string; pos: Vec; w: number }
+/** `lockId` : la valeur est imposée par l'utilisateur (verrou), elle ne bouge plus quand on règle autre chose. */
+export interface LenLabel { kind: 'len'; key: string; a: string; b: string; value: number; text: string; pos: Vec; w: number; lockId?: string }
+export interface AngLabel { kind: 'ang'; key: string; p: string; v: string; n: string; value: number; text: string; pos: Vec; w: number; lockId?: string }
 export type MLabel = LenLabel | AngLabel;
 
 export interface Measures {
@@ -43,6 +45,14 @@ export function collectMeasures(c: Construction, vp: Viewport, o: MeasureOpts): 
     if (!ob.visible) continue;
     if (ob.def.k === 'distance') explicitLen.add(pairKey(ob.def.a, ob.def.b));
     if (ob.def.k === 'angle') explicitAng.add(`${ob.def.b}|${pairKey(ob.def.a, ob.def.c)}`);
+  }
+
+  // Valeurs imposées (verrous) : repérées pour les afficher dans une pastille.
+  const lenLock = new Map<string, string>(), angLock = new Map<string, string>();
+  for (const l of lockObjects(c)) {
+    const d = l.def;
+    if (d.kind === 'len') lenLock.set(pairKey(d.a, d.b), l.id);
+    else if (d.kind === 'ang') angLock.set(`${d.v}|${pairKey(d.p, d.n)}`, l.id);
   }
 
   // ---------- côtés : segments et côtés de polygones ----------
@@ -91,7 +101,7 @@ export function collectMeasures(c: Construction, vp: Viewport, o: MeasureOpts): 
       if (e.out) sign = G.dot(nrm, e.out) >= 0 ? 1 : -1;
       else sign = nrm.y < -1e-6 ? 1 : nrm.y > 1e-6 ? -1 : nrm.x > 0 ? 1 : -1; // par défaut : au-dessus / à droite
       const off = 9 + Math.abs(nrm.x) * (w / 2) + Math.abs(nrm.y) * (LABEL_H / 2);
-      m.labels.push({ kind: 'len', key: `len:${key}`, a: e.a, b: e.b, value: L, text, pos: G.add(mid, G.mul(nrm, sign * off)), w });
+      m.labels.push({ kind: 'len', key: `len:${key}`, a: e.a, b: e.b, value: L, text, pos: G.add(mid, G.mul(nrm, sign * off)), w, lockId: lenLock.get(key) });
     }
   }
   if (o.marks) {
@@ -144,7 +154,7 @@ export function collectMeasures(c: Construction, vp: Viewport, o: MeasureOpts): 
         const mid = a1 + sweep / 2;
         const rr = r + 6 + w / 2 * Math.abs(Math.cos(mid)) + LABEL_H / 2 * Math.abs(Math.sin(mid));
         m.labels.push({
-          kind: 'ang', key: `ang:${vId}`, p: prevId, v: vId, n: nextId, value: deg, text, w,
+          kind: 'ang', key: `ang:${vId}`, p: prevId, v: vId, n: nextId, value: deg, text, w, lockId: angLock.get(`${vId}|${pairKey(prevId, nextId)}`),
           pos: { x: sV.x + Math.cos(mid) * rr, y: sV.y + Math.sin(mid) * rr },
         });
       });
@@ -198,8 +208,8 @@ export function drawMeasures(ctx: CanvasRenderingContext2D, m: Measures, th: The
   ctx.textBaseline = 'middle';
   for (const l of m.labels) {
     const hot = hover === l.key;
-    if (hot) {
-      // Survol : la valeur apparaît comme un champ modifiable.
+    if (hot || l.lockId) {
+      // Survol : la valeur apparaît comme un champ modifiable. Valeur imposée : pastille permanente.
       ctx.fillStyle = th.bg;
       ctx.globalAlpha = 0.95;
       ctx.beginPath();
@@ -207,7 +217,7 @@ export function drawMeasures(ctx: CanvasRenderingContext2D, m: Measures, th: The
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.strokeStyle = th.select;
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = hot ? 2 : 1.3;
       ctx.stroke();
     } else {
       ctx.lineWidth = 4;
