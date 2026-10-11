@@ -42,6 +42,10 @@ interface Props {
   onEdit: (info: PickInfo) => void;
   /** Résultat d'un tracé à main levée (pour proposer d'autres interprétations). */
   onSketch: (summary: string, stroke: Vec[], shape: Shape) => void;
+  /** Objets à ne pas encore montrer (rejeu de la construction). */
+  hiddenIds?: Set<string>;
+  /** Figure en lecture seule (rejeu). */
+  frozen?: boolean;
 }
 
 type Drag =
@@ -70,6 +74,8 @@ export function CanvasView(p: Props) {
     hover: null as string | null,
     hoverLabel: null as string | null,
     hoverName: null as string | null,
+    /** Dernier clic (coordonnées monde). */
+    lastAt: null as Vec | null,
     mouse: null as Vec | null,
     theme: readTheme(),
     raf: 0,
@@ -102,6 +108,7 @@ export function CanvasView(p: Props) {
       measures: collectMeasures(c, vp, props.current.measures),
       hoverLabel: s.hoverLabel,
       hoverName: s.hoverName,
+      hiddenIds: props.current.hiddenIds,
       preview: s.mouse ? (cx) => preview(cx, c, vp, tool, s.pending, s.mouse!, s.theme) : undefined,
     });
     // Encre du tracé à main levée en cours
@@ -158,7 +165,7 @@ export function CanvasView(p: Props) {
   // Redessine à chaque changement de figure, de réglage ou de thème.
   useEffect(() => { const off = p.c.subscribe(requestDraw); return () => { off(); }; }, [p.c]);
   useEffect(() => { st.current.theme = readTheme(); requestDraw(); }, [p.theme]);
-  useEffect(requestDraw, [p.grid, p.axes, p.selected, p.measures]);
+  useEffect(requestDraw, [p.grid, p.axes, p.selected, p.measures, p.hiddenIds]);
   useEffect(() => {
     st.current.pending = [];
     st.current.committed = false;
@@ -237,7 +244,7 @@ export function CanvasView(p: Props) {
       onAsk(tool, ids);
     } else if (tool.run) {
       commitOnce();
-      try { tool.run(c, ids); } catch (e) { onError((e as Error).message); }
+      try { tool.run(c, ids, undefined, st.current.lastAt ?? undefined); } catch (e) { onError((e as Error).message); }
       c.changed();
     }
     st.current.committed = false;
@@ -251,6 +258,8 @@ export function CanvasView(p: Props) {
     const s = local(e);
     const hits = hitTest(c, vp, s);
     const S = st.current;
+    if (props.current.frozen) return;
+    S.lastAt = vp.toWorld(s);
 
     // Mode « choisis un côté » : le prochain clic désigne un segment ou un côté de polygone.
     if (props.current.edgePick && e.button === 0) {
@@ -473,6 +482,13 @@ function preview(ctx: CanvasRenderingContext2D, c: Construction, vp: Viewport, t
     case 'line': if (a) line(a, mouse, 'both'); break;
     case 'ray': if (a) line(a, mouse, 'ray'); break;
     case 'circle2': if (a) { const s = S(a); ctx.beginPath(); ctx.arc(s.x, s.y, G.dist(s, m), 0, Math.PI * 2); ctx.stroke(); } break;
+    case 'compassThrough': if (a) { const s = S(a); ctx.beginPath(); ctx.arc(s.x, s.y, G.dist(s, m), 0, Math.PI * 2); ctx.stroke(); } break;
+    case 'compass': {
+      const b = P(pending[1]);
+      if (a && b) { ctx.beginPath(); ctx.arc(m.x, m.y, G.dist(S(a), S(b)), 0, Math.PI * 2); ctx.stroke(); }
+      else if (a) line(a, mouse, 'none');
+      break;
+    }
     case 'polygon': {
       ctx.beginPath();
       pending.forEach((id, i) => { const p = P(id); if (p) { const s = S(p); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); } });

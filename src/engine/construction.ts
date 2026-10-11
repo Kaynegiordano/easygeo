@@ -21,6 +21,8 @@ export type Def =
   | { k: 'bisector'; a: string; b: string }
   | { k: 'angleBisector'; a: string; b: string; c: string }
   | { k: 'circle2'; c: string; p: string }
+  /** Compas : écartement [ab] reporté autour du centre c. */
+  | { k: 'compass'; c: string; a: string; b: string }
   | { k: 'circleR'; c: string; r: string }
   | { k: 'polygon'; pts: string[] }
   | { k: 'function'; expr: string }
@@ -45,6 +47,8 @@ export interface GeoObject {
   labelOff?: { x: number; y: number };
   /** Nom du point non affiché sur la figure. */
   noName?: boolean;
+  /** Cercle tracé au compas : on n'en montre qu'un arc, autour des points construits dessus. */
+  arc?: boolean;
 }
 
 export interface Computed {
@@ -63,7 +67,7 @@ const TYPE_OF: Record<Def['k'], ObjType> = {
   reflectLine: 'point', reflectPoint: 'point', translate: 'point', rotate: 'point',
   segment: 'line', line: 'line', ray: 'line', perp: 'line', parallel: 'line',
   bisector: 'line', angleBisector: 'line',
-  circle2: 'circle', circleR: 'circle', polygon: 'polygon', function: 'function',
+  circle2: 'circle', compass: 'circle', circleR: 'circle', polygon: 'polygon', function: 'function',
   slider: 'number', distance: 'number', angle: 'number', lock: 'number',
 };
 
@@ -93,7 +97,7 @@ export function refs(d: Def): string[] {
     case 'translate': return [d.p, d.a, d.b];
     case 'rotate': return [d.p, d.c];
     case 'perp': case 'parallel': return [d.p, d.l];
-    case 'angleBisector': case 'angle': return [d.a, d.b, d.c];
+    case 'angleBisector': case 'angle': case 'compass': return [d.a, d.b, d.c];
     case 'lock': return d.kind === 'len' ? [d.a, d.b] : d.kind === 'ang' ? [d.p, d.v, d.n] : [d.a, d.b, d.c, d.d];
     case 'circle2': return [d.c, d.p];
     case 'circleR': return [d.c];
@@ -318,6 +322,10 @@ export class Construction {
       case 'circle2': {
         const c = P(d.c), p = P(d.p);
         return c && p ? { circle: { c, r: G.dist(c, p) } } : undefined;
+      }
+      case 'compass': {
+        const c = P(d.c), a = P(d.a), b = P(d.b);
+        return c && a && b && G.dist(a, b) > 1e-12 ? { circle: { c, r: G.dist(a, b) } } : undefined;
       }
       case 'circleR': {
         const c = P(d.c), r = evalExpr(d.r, this.scope);

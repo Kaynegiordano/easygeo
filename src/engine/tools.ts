@@ -1,6 +1,7 @@
 // Outils de construction à la souris : étapes de sélection + création.
 import type { Construction } from './construction';
 import { imageOf, regularPolygon } from './commands';
+import * as G from './geom';
 
 /** Ce que l'étape attend : point, ligne (droite/segment/demi-droite), courbe (ligne/cercle/fonction), objet transformable. */
 export type Need = 'point' | 'line' | 'curve' | 'obj';
@@ -15,7 +16,8 @@ export interface Tool {
   hints: string[];
   steps: Need[] | 'polygon';
   ask?: Ask;
-  run?: (c: Construction, ids: string[], answer?: string) => void;
+  /** `at` : endroit (monde) du dernier clic, utile pour choisir entre plusieurs résultats. */
+  run?: (c: Construction, ids: string[], answer?: string, at?: G.Vec) => void;
 }
 
 export const GROUPS = [
@@ -64,6 +66,31 @@ export const TOOLS: Tool[] = [
     ask: { label: 'Rayon du cercle', default: '3' },
     run: (c, [ctr], r) => { c.add({ k: 'circleR', c: ctr, r: (r ?? '3').replace(',', '.') }); } },
 
+  // ----- Mode « règle et compas » -----
+  { id: 'rcIntersect', label: 'Marquer un point d’intersection', group: 'rc', steps: ['curve', 'curve'],
+    hints: ['Clique sur le premier trait ou arc.', 'Clique sur le second, près de l’endroit où ils se croisent.'],
+    run: (c, [a, b], _r, at) => {
+      c.recompute();
+      const raw = c.intersections(a, b);
+      let best = -1, bd = Infinity;
+      raw.forEach((p, i) => {
+        if (!p) return;
+        const d = at ? G.dist(p, at) : i;
+        if (d < bd) { bd = d; best = i; }
+      });
+      if (best < 0) throw new Error('Ces traits ne se coupent pas.');
+      if (c.objects.some((o) => o.def.k === 'intersect' && o.def.i === best && ((o.def.a === a && o.def.b === b) || (o.def.a === b && o.def.b === a)))) {
+        throw new Error('Ce point est déjà marqué.');
+      }
+      c.add({ k: 'intersect', a, b, i: best });
+    } },
+  { id: 'compass', label: 'Compas : écartement AB, pointe en C', group: 'rc', steps: ['point', 'point', 'point'],
+    hints: ['Écartement : clique sur la première extrémité.', 'Clique sur la seconde extrémité (c’est l’écartement du compas).', 'Pointe sèche : clique sur le centre de l’arc.'],
+    run: (c, [a, b, ctr]) => { c.get(c.add({ k: 'compass', c: ctr, a, b }))!.arc = true; } },
+  { id: 'compassThrough', label: 'Compas : centre, passant par un point', group: 'rc', steps: ['point', 'point'],
+    hints: ['Pointe sèche : clique sur le centre.', 'Clique sur le point par lequel passe l’arc.'],
+    run: (c, [ctr, p]) => { c.get(c.add({ k: 'circle2', c: ctr, p }))!.arc = true; } },
+
   { id: 'polygon', label: 'Polygone', group: 'polys', steps: 'polygon', hints: ['Clique sur les sommets un par un, puis à nouveau sur le premier pour fermer.'],
     run: (c, ids) => { c.add({ k: 'polygon', pts: ids }); } },
   { id: 'regular', label: 'Polygone régulier', group: 'polys', steps: ['point', 'point'], hints: ['Clique sur le premier sommet.', 'Clique sur le deuxième sommet.'],
@@ -89,6 +116,19 @@ export const TOOLS: Tool[] = [
   { id: 'angle', label: 'Angle', group: 'measure', steps: ['point', 'point', 'point'], hints: ['Clique sur un point du premier côté.', 'Clique sur le sommet.', 'Clique sur un point du second côté.'],
     run: (c, [a, b, d]) => { c.add({ k: 'angle', a, b, c: d }); } },
   { id: 'delete', label: 'Gomme', group: 'measure', steps: [], hints: ['Clique sur un objet pour le supprimer (avec ce qui en dépend).'] },
+];
+
+/** Outils du mode « règle et compas » (dans l'ordre de la barre) et leur nom dans ce mode. */
+export const RC_TOOLS: [string, string][] = [
+  ['move', 'Déplacer'],
+  ['point', 'Placer un point'],
+  ['rcIntersect', 'Marquer un point d’intersection'],
+  ['segment', 'Règle : tracer un segment'],
+  ['line', 'Règle : tracer une droite'],
+  ['ray', 'Règle : tracer une demi-droite'],
+  ['compass', 'Compas : écartement AB, pointe en C'],
+  ['compassThrough', 'Compas : centre, passant par un point'],
+  ['delete', 'Gomme'],
 ];
 
 export const toolById = (id: string) => TOOLS.find((t) => t.id === id)!;

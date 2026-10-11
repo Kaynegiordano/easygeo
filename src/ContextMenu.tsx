@@ -197,7 +197,11 @@ export function buildMenu(c: Construction, info: PickInfo): { title: string; ite
     const r = c.comp(o.id)?.circle?.r ?? 1;
     return {
       title: `Cercle ${o.name}`,
-      items: [{ label: 'Rayon…', prompt: { label: `Rayon du cercle ${o.name}`, value: f(r), apply: (v) => setRadius(c, o.id, num(v)) } }, ...common(c, o.id)],
+      items: [
+        ...(d.k === 'compass' ? [] : [{ label: 'Rayon…', prompt: { label: `Rayon du cercle ${o.name}`, value: f(r), apply: (v: string) => setRadius(c, o.id, num(v)) } }]),
+        { label: o.arc ? 'Montrer le cercle entier' : 'Tracer seulement un arc (au compas)', run: () => { o.arc = o.arc ? undefined : true; } },
+        ...common(c, o.id),
+      ],
     };
   }
   if (d.k === 'function') {

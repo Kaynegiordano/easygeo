@@ -71,7 +71,7 @@ export function Sidebar({ c, selected, onSelect, commit, onRename }: Props) {
         {!objects.length && (
           <div className="empty">
             <p>Ta figure est vide.</p>
-            <p>Choisis un outil en haut, tape une commande ci-dessous, ou demande à l'assistant IA ✨</p>
+            <p>Choisis un outil en haut, dessine à main levée, ou tape une commande ci-dessous.</p>
           </div>
         )}
         {groups.map((g) => (

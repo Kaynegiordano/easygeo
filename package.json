@@ -1,8 +1,8 @@
 {
   "name": "easygeo",
   "productName": "EasyGeo",
-  "version": "0.2.0",
-  "description": "Géométrie dynamique moderne avec assistant IA",
+  "version": "0.3.0",
+  "description": "Géométrie dynamique moderne pour le collège",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -11,7 +11,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "app": "vite build && electron .",
-    "dist:lite": "tsc --noEmit && vite build && electron-builder --config electron-builder.lite.json"
+    "dist": "tsc --noEmit && vite build && electron-builder --config electron-builder.json"
   },
   "dependencies": {
     "mathjs": "^15.2.0",

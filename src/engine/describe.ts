@@ -37,6 +37,7 @@ export function defToCommand(c: Construction, o: GeoObject): string {
     case 'bisector': return `Mediatrice(${n(d.a)}, ${n(d.b)})`;
     case 'angleBisector': return `Bissectrice(${n(d.a)}, ${n(d.b)}, ${n(d.c)})`;
     case 'circle2': return `Cercle(${n(d.c)}, ${n(d.p)})`;
+    case 'compass': return `Compas(${n(d.c)}, ${n(d.a)}, ${n(d.b)})`;
     case 'circleR': return `Cercle(${n(d.c)}, ${d.r})`;
     case 'polygon': return `Polygone(${d.pts.map(n).join(', ')})`;
     case 'function': return `${o.name}(x) = ${d.expr}`;
@@ -70,12 +71,38 @@ function lineEquation(p: { x: number; y: number }, d: { x: number; y: number }) 
   return `y = ${fmt(m)}x${qs}`;
 }
 
-/** Description complète de la figure, envoyée à l'IA comme contexte. */
-export function describeConstruction(c: Construction): string {
-  const lines = c.objects.filter((o) => !o.aux).map((o) => {
-    const def = o.def.k === 'function' ? defToCommand(c, o) : `${o.name} = ${defToCommand(c, o)}`;
-    const shown = displayName(c, o) !== o.name ? ` noté ${displayName(c, o)}` : '';
-    return `- ${def}${shown} → ${valueText(c, o)}${o.visible ? '' : ' (masqué)'}`;
-  });
-  return lines.length ? lines.join('\n') : '(figure vide)';
+/** Une étape de construction écrite comme une consigne d'exercice (pour « Rejouer »). */
+export function stepText(c: Construction, o: GeoObject): string {
+  const n = (id: string) => c.nameOf(id);
+  const dn = (id: string) => { const x = c.get(id); return x ? displayName(c, x) : '?'; };
+  const d = o.def;
+  switch (d.k) {
+    case 'free': return `Place le point ${o.name}.`;
+    case 'coords': return `Place le point ${o.name} (${d.x} ; ${d.y}).`;
+    case 'on': return `Place un point ${o.name} sur ${dn(d.o)}.`;
+    case 'midpoint': return `Place le point ${o.name}, milieu de [${n(d.a)}${n(d.b)}].`;
+    case 'intersect': return `Marque le point ${o.name}, à l’intersection de ${dn(d.a)} et ${dn(d.b)}.`;
+    case 'segment': return `À la règle, trace le segment [${n(d.a)}${n(d.b)}].`;
+    case 'line': return `À la règle, trace la droite (${n(d.a)}${n(d.b)}).`;
+    case 'ray': return `À la règle, trace la demi-droite [${n(d.a)}${n(d.b)}).`;
+    case 'circle2': return o.arc
+      ? `Au compas : pointe en ${n(d.c)}, règle l’écartement sur ${n(d.c)}${n(d.p)} et trace un arc de cercle.`
+      : `Trace le cercle de centre ${n(d.c)} passant par ${n(d.p)}.`;
+    case 'compass': return `Au compas : prends l’écartement ${n(d.a)}${n(d.b)}, pointe en ${n(d.c)} et trace un arc de cercle.`;
+    case 'circleR': return `Trace le cercle de centre ${n(d.c)} et de rayon ${d.r}.`;
+    case 'perp': return `Trace la perpendiculaire à ${dn(d.l)} passant par ${n(d.p)}.`;
+    case 'parallel': return `Trace la parallèle à ${dn(d.l)} passant par ${n(d.p)}.`;
+    case 'bisector': return `Trace la médiatrice de [${n(d.a)}${n(d.b)}].`;
+    case 'angleBisector': return `Trace la bissectrice de l’angle ${n(d.a)}${n(d.b)}${n(d.c)}.`;
+    case 'polygon': return `Trace le polygone ${d.pts.map(n).join('')}.`;
+    case 'reflectLine': return `Construis le symétrique de ${n(d.p)} par rapport à ${dn(d.l)} : ${o.name}.`;
+    case 'reflectPoint': return `Construis le symétrique de ${n(d.p)} par rapport à ${n(d.c)} : ${o.name}.`;
+    case 'translate': return `Construis l’image de ${n(d.p)} par la translation de ${n(d.a)} vers ${n(d.b)} : ${o.name}.`;
+    case 'rotate': return `Construis l’image de ${n(d.p)} par la rotation de centre ${n(d.c)} et d’angle ${d.angle}° : ${o.name}.`;
+    case 'function': return `Trace la courbe de ${o.name}(x) = ${d.expr}.`;
+    case 'slider': return `Crée le curseur ${o.name}.`;
+    case 'distance': return `Mesure la longueur ${n(d.a)}${n(d.b)}.`;
+    case 'angle': return `Mesure l’angle ${n(d.a)}${n(d.b)}${n(d.c)}.`;
+    case 'lock': return '';
+  }
 }

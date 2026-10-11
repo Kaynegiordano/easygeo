@@ -23,6 +23,8 @@ export interface DrawOptions {
   hoverLabel?: string | null;
   /** Point dont le nom est survolé (il se modifie d'un clic). */
   hoverName?: string | null;
+  /** Objets non encore construits (mode « Rejouer »). */
+  hiddenIds?: Set<string>;
   preview?: (ctx: CanvasRenderingContext2D, tw: (p: Vec) => Vec) => void;
 }
 
@@ -73,7 +75,7 @@ export function draw(ctx: CanvasRenderingContext2D, c: Construction, vp: Viewpor
 
   if (o.grid || o.axes) drawGrid(ctx, vp, th, o.grid, o.axes);
 
-  const vis = c.objects.filter((x) => x.visible && c.comp(x.id));
+  const vis = c.objects.filter((x) => x.visible && c.comp(x.id) && !o.hiddenIds?.has(x.id));
   const highlight = (x: GeoObject) => o.selected.has(x.id) || o.pending.has(x.id) || o.hover === x.id;
   const order: GeoObject['type'][] = ['polygon', 'function', 'circle', 'line', 'number', 'point'];
 
@@ -103,8 +105,14 @@ export function draw(ctx: CanvasRenderingContext2D, c: Construction, vp: Viewpor
         labelAt(ctx, th, obj.name, curveLabelPos(vp, k.fn), obj.color);
       } else if (k.circle) {
         const s = S(k.circle.c);
+        const R = k.circle.r * vp.view.scale;
+        const span = arcSpan(c, obj, k.circle);
         ctx.beginPath();
-        ctx.arc(s.x, s.y, k.circle.r * vp.view.scale, 0, Math.PI * 2);
+        if (span) {
+          // Tracé de compas : un arc fin, comme sur une vraie construction.
+          ctx.lineWidth = hl ? 3 : 1.5;
+          ctx.arc(s.x, s.y, R, -span.start, -(span.start + span.span), true);
+        } else ctx.arc(s.x, s.y, R, 0, Math.PI * 2);
         ctx.stroke();
       } else if (k.line) {
         const seg = visibleSegment(vp, k.line);
@@ -364,6 +372,49 @@ function pill(ctx: CanvasRenderingContext2D, th: Theme, text: string, p: Vec, co
   ctx.fillText(text, p.x, p.y + 0.5);
 }
 
+const TAU = Math.PI * 2;
+const wrap = (a: number) => ((a % TAU) + TAU) % TAU;
+
+export interface ArcSpan { start: number; span: number }
+
+/**
+ * Arc à montrer pour un cercle tracé au compas (null = cercle entier).
+ * Un arc assez large (±90°) autour du point de passage (ou, pour un écartement reporté, vers le reste de la figure), pour pouvoir
+ * y croiser d'autres traits ; il s'allonge si on marque des points plus loin sur le cercle.
+ */
+export function arcSpan(c: Construction, obj: GeoObject, circ: { c: Vec; r: number }): ArcSpan | null {
+  if (!obj.arc) return null;
+  const eps = 1e-6 * Math.max(1, circ.r);
+  const anchorId = obj.def.k === 'circle2' ? obj.def.p : null;
+  let anchor: number | null = null;
+  const angs: number[] = [];
+  let mx = 0, my = 0, n = 0;
+  for (const o of c.objects) {
+    if (!o.visible || o.type !== 'point') continue;
+    const p = c.comp(o.id)?.pt;
+    if (!p) continue;
+    const d = G.dist(p, circ.c);
+    if (d < eps) continue;
+    if (Math.abs(d - circ.r) < eps) {
+      const a = wrap(Math.atan2(p.y - circ.c.y, p.x - circ.c.x));
+      if (o.id === anchorId) anchor = a; else angs.push(a);
+    } else { mx += p.x - circ.c.x; my += p.y - circ.c.y; n++; }
+  }
+  // Fenêtre de base (±75°) autour du point de passage, étendue pour contenir tous les points marqués sur le cercle.
+  const HALF = 1.3, MARGIN = 0.25;
+  const base = anchor ?? (n && (mx || my) ? Math.atan2(my, mx) : 0);
+  const all = [wrap(base - HALF), wrap(base), wrap(base + HALF), ...angs].sort((a, b) => a - b);
+  let g = 0, gap = -1;
+  all.forEach((a, i) => {
+    const next = i === all.length - 1 ? all[0] + TAU : all[i + 1];
+    if (next - a > gap) { gap = next - a; g = i; }
+  });
+  const span = TAU - gap + 2 * MARGIN;
+  return span > TAU * 0.8 ? null : { start: all[(g + 1) % all.length] - MARGIN, span };
+}
+
+export const angleIn = (a: ArcSpan, ang: number) => wrap(ang - a.start) <= a.span;
+
 /** Objets sous le curseur, du plus prioritaire au moins prioritaire. */
 export function hitTest(c: Construction, vp: Viewport, s: Vec): string[] {
   const p = vp.toWorld(s);
@@ -381,7 +432,8 @@ export function hitTest(c: Construction, vp: Viewport, s: Vec): string[] {
       if (d < tol) hits.push({ id: o.id, prio: 1, d });
     } else if (k.circle) {
       const d = Math.abs(G.dist(p, k.circle.c) - k.circle.r);
-      if (d < tol) hits.push({ id: o.id, prio: 1, d });
+      const span = arcSpan(c, o, k.circle);
+      if (d < tol && (!span || angleIn(span, Math.atan2(p.y - k.circle.c.y, p.x - k.circle.c.x)))) hits.push({ id: o.id, prio: 1, d });
     } else if (k.fn) {
       const y = k.fn(p.x);
       const d = Math.abs(y - p.y);

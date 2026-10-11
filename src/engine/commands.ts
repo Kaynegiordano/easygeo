@@ -269,6 +269,11 @@ export class CommandRunner {
         return;
       }
       case 'bissectrice': this.need(args, 3, 'Bissectrice(A, B, C) — angle de sommet B'); add({ k: 'angleBisector', a: this.point(args[0]), b: this.point(args[1]), c: this.point(args[2]) }); return;
+      case 'compas': {
+        this.need(args, 3, 'Compas(centre, A, B) — arc de rayon AB centré en « centre »');
+        c.get(add({ k: 'compass', c: this.point(args[0]), a: this.point(args[1]), b: this.point(args[2]) }))!.arc = true;
+        return;
+      }
       case 'cercle': {
         this.need(args, 2, 'Cercle(centre, point) ou Cercle(centre, rayon)');
         const center = this.point(args[0]);
@@ -389,6 +394,7 @@ export function imageOf(c: Construction, id: string, mk: PointMaker): string {
       return c.add({ k: d.k, a: img(d.a), b: img(d.b) }, opts);
     case 'circle2': return c.add({ k: 'circle2', c: img(d.c), p: img(d.p) }, opts);
     case 'circleR': return c.add({ k: 'circleR', c: img(d.c), r: d.r }, opts);
+    case 'compass': return c.add({ k: 'compass', c: img(d.c), a: img(d.a), b: img(d.b) }, opts);
     case 'polygon': return c.add({ k: 'polygon', pts: d.pts.map(img) }, opts);
     case 'angleBisector': case 'angle': return c.add({ k: d.k, a: img(d.a), b: img(d.b), c: img(d.c) }, opts);
   }
@@ -406,7 +412,7 @@ export function regularPolygon(c: Construction, a: string, b: string, n: number,
   return c.add({ k: 'polygon', pts }, { name });
 }
 
-/** Aide-mémoire affiché dans l'interface et donné à l'IA. */
+/** Aide-mémoire affiché dans l'interface. */
 export const COMMAND_HELP: [string, string][] = [
   ['A = (2 ; 3)', 'point de coordonnées (2 ; 3)'],
   ['f(x) = 2x + 1', 'fonction'],
@@ -417,6 +423,7 @@ export const COMMAND_HELP: [string, string][] = [
   ['Milieu(A, B)', 'milieu de [AB]'],
   ['Cercle(O, A)', 'cercle de centre O passant par A'],
   ['Cercle(O, 3)', 'cercle de centre O et de rayon 3'],
+  ['Compas(C, A, B)', 'arc de cercle de centre C et de rayon AB (compas)'],
   ['Perpendiculaire(C, (AB))', 'perpendiculaire à (AB) passant par C'],
   ['Parallele(C, (AB))', 'parallèle à (AB) passant par C'],
   ['Mediatrice(A, B)', 'médiatrice de [AB]'],

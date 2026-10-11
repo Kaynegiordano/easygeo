@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
-  "appId": "com.kane.easygeo.lite",
-  "productName": "EasyGeo Lite",
+  "appId": "com.kane.easygeo",
+  "productName": "EasyGeo",
   "copyright": "EasyGeo",
   "directories": {
     "output": "release",
@@ -12,18 +12,8 @@
     "electron/**/*",
     "package.json"
   ],
-  "extraResources": [
-    {
-      "from": "tools/lite/ai",
-      "to": "ai"
-    },
-    {
-      "from": "tools/lite/edition.json",
-      "to": "edition.json"
-    }
-  ],
   "asar": true,
-  "compression": "normal",
+  "compression": "maximum",
   "win": {
     "target": [
       {
@@ -42,13 +32,13 @@
     "allowToChangeInstallationDirectory": false,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
-    "shortcutName": "EasyGeo Lite",
+    "shortcutName": "EasyGeo",
     "runAfterFinish": true,
     "deleteAppDataOnUninstall": false,
     "installerIcon": "build/icon.ico",
     "uninstallerIcon": "build/icon.ico",
     "language": "1036",
-    "artifactName": "EasyGeo-Lite-Setup-${version}.exe"
+    "artifactName": "EasyGeo-Setup-${version}.exe"
   },
   "electronDist": "node_modules/electron/dist"
 }

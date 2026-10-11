@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Construction, type Snapshot } from './engine/construction';
 import { nameBox, Viewport } from './engine/render';
-import { GROUPS, TOOLS, toolById, type Tool } from './engine/tools';
+import { GROUPS, RC_TOOLS, TOOLS, toolById, type Tool } from './engine/tools';
+import { stepText } from './engine/describe';
 import { CanvasView } from './CanvasView';
 import { Sidebar } from './Sidebar';
-import { AiPanel } from './AiPanel';
 import { Icon } from './icons';
 import { moveFreePoint } from './engine/solve';
 import { buildMenu, ContextMenu, labelPrompt, primaryEdit, renamePrompt, type EdgePick, type MenuItem, type PromptSpec } from './ContextMenu';
@@ -18,7 +18,9 @@ const PREFS = 'easygeo.prefs';
 const readJSON = <T,>(k: string): T | null => { try { return JSON.parse(localStorage.getItem(k) ?? 'null'); } catch { return null; } };
 const writeJSON = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* stockage indisponible */ } };
 
-interface Prefs { grid: boolean; axes: boolean; snap: boolean; theme: 'light' | 'dark'; ai: boolean; measures: MeasureOpts }
+interface Prefs { grid: boolean; axes: boolean; snap: boolean; theme: 'light' | 'dark'; measures: MeasureOpts; /** Mode « règle et compas » */ rc: boolean }
+
+const NO_MEASURES: MeasureOpts = { lengths: false, angles: false, marks: false, unit: false };
 
 export function App() {
   const c = useMemo(() => {
@@ -35,7 +37,7 @@ export function App() {
   const [prefs, setPrefs] = useState<Prefs>(() => {
     const saved = readJSON<Partial<Prefs>>(PREFS);
     return {
-      grid: true, axes: true, snap: true, ai: true,
+      grid: true, axes: true, snap: true, rc: false,
       theme: window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
       ...saved,
       measures: { ...DEFAULT_MEASURES, ...saved?.measures },
@@ -59,6 +61,25 @@ export function App() {
   const [, force] = useState(0);
   const [menu, setMenu] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // Rejeu de la construction : n étapes déjà tracées.
+  const [replay, setReplay] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const steps = c.objects.filter((o) => !o.aux && o.def.k !== 'lock');
+  const hiddenIds = useMemo(
+    () => (replay === null ? undefined : new Set(steps.slice(replay).map((o) => o.id))),
+    [c.version, replay], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  useEffect(() => {
+    if (!playing || replay === null) return;
+    const t = setTimeout(() => { if (replay >= steps.length) setPlaying(false); else setReplay(replay + 1); }, 1500);
+    return () => clearTimeout(t);
+  }, [playing, replay, steps.length]);
+  const startReplay = () => {
+    if (!steps.length) { setToast('Il n’y a encore rien à rejouer : construis une figure d’abord.'); return; }
+    setToolId('move'); setSelected(null); setMenu2(null); setAsk(null); setReplay(1); setPlaying(true);
+  };
+  const toggleRc = () => { setReplay(null); setPlaying(false); setToolId('move'); setSelected(null); setPref('rc', !prefs.rc); };
 
   const setPref = <K extends keyof Prefs>(k: K, v: Prefs[K]) => setPrefs((p) => ({ ...p, [k]: v }));
 
@@ -99,6 +120,13 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = (e.target as HTMLElement).closest('input, textarea, select');
+      if (replay !== null && !typing) {
+        if (e.key === 'Escape') { setPlaying(false); setReplay(null); }
+        else if (e.key === 'ArrowRight') { setPlaying(false); setReplay(Math.min(steps.length, replay + 1)); }
+        else if (e.key === 'ArrowLeft') { setPlaying(false); setReplay(Math.max(1, replay - 1)); }
+        else if (e.key === ' ') { e.preventDefault(); setPlaying(!playing); }
+        return;
+      }
       if (e.ctrlKey && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
       else if (e.ctrlKey && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); doRedo(); }
       else if (e.key === 'Escape') {
@@ -212,29 +240,6 @@ export function App() {
     if (c.objects.length && !confirm('Effacer la figure actuelle ? (tu pourras annuler avec Ctrl+Z)')) return;
     commit(); c.clear(); c.changed(); setSelected(null);
   };
-  /** Recadre la vue sur la figure, seulement si elle sort de l'écran ou y est minuscule. */
-  const ensureVisible = () => {
-    const pts: Vec[] = [];
-    for (const o of c.objects) {
-      if (!o.visible || o.aux) continue;
-      const k = c.comp(o.id);
-      if (k?.pt) pts.push(k.pt);
-      else if (k?.circle) pts.push({ x: k.circle.c.x - k.circle.r, y: k.circle.c.y - k.circle.r }, { x: k.circle.c.x + k.circle.r, y: k.circle.c.y + k.circle.r });
-      else if (k?.poly) pts.push(...k.poly);
-    }
-    if (!pts.length || !vp.w || !vp.h) return;
-    const x0 = Math.min(...pts.map((p) => p.x)), x1 = Math.max(...pts.map((p) => p.x));
-    const y0 = Math.min(...pts.map((p) => p.y)), y1 = Math.max(...pts.map((p) => p.y));
-    const b = vp.bounds, mx = (b.x1 - b.x0) * 0.06, my = (b.y1 - b.y0) * 0.06;
-    const inside = x0 > b.x0 + mx && x1 < b.x1 - mx && y0 > b.y0 + my && y1 < b.y1 - my;
-    const small = Math.max((x1 - x0) / (b.x1 - b.x0), (y1 - y0) / (b.y1 - b.y0)) < 0.2;
-    if (inside && !small) return;
-    const w = Math.max(x1 - x0, 1), h = Math.max(y1 - y0, 1);
-    vp.view.scale = Math.min(110, Math.max(18, Math.min((vp.w * 0.78) / w, (vp.h * 0.78) / h)));
-    vp.view.ox = (x0 + x1) / 2;
-    vp.view.oy = (y0 + y1) / 2;
-    c.changed();
-  };
   const zoom = (f: number) => { vp.zoomAt({ x: vp.w / 2, y: vp.h / 2 }, f); c.changed(); };
   const resetView = () => { Object.assign(vp.view, { ox: 0, oy: 0, scale: 50 }); c.changed(); };
 
@@ -256,7 +261,16 @@ export function App() {
         </div>
 
         <nav className="tools">
-          {GROUPS.map((g) => (
+          {prefs.rc ? (
+            <div className="tool-group">
+              {RC_TOOLS.map(([id, label]) => (
+                <button key={id} className={`tool ${toolId === id ? 'on' : ''}`} data-tip={label} aria-label={label}
+                  onClick={() => { setToolId(id); setSelected(null); }}>
+                  <Icon name={id} />
+                </button>
+              ))}
+            </div>
+          ) : GROUPS.map((g) => (
             <div className="tool-group" key={g.id}>
               {TOOLS.filter((t) => t.group === g.id).map((t) => (
                 <button key={t.id} className={`tool ${toolId === t.id ? 'on' : ''}`} data-tip={t.label} aria-label={t.label}
@@ -286,8 +300,9 @@ export function App() {
           <button className="icon-btn" data-tip={prefs.theme === 'dark' ? 'Thème clair' : 'Thème sombre'} onClick={() => setPref('theme', prefs.theme === 'dark' ? 'light' : 'dark')}>
             <Icon name={prefs.theme === 'dark' ? 'sun' : 'moon'} size={19} />
           </button>
-          <button className={`ai-toggle ${prefs.ai ? 'on' : ''}`} onClick={() => setPref('ai', !prefs.ai)}>
-            <Icon name="sparkle" size={18} /> Assistant
+          <button className="icon-btn" data-tip="Rejouer la construction pas à pas" onClick={startReplay}><Icon name="play" size={19} /></button>
+          <button className={`mode-toggle ${prefs.rc ? 'on' : ''}`} data-tip="Construire seulement avec une règle et un compas" onClick={toggleRc}>
+            <Icon name="rc" size={18} /> Règle et compas
           </button>
           <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) openFile(f); e.target.value = ''; }} />
         </div>
@@ -296,10 +311,11 @@ export function App() {
       <main className="main">
         <Sidebar c={c} selected={selected} onSelect={setSelected} commit={commit} onRename={(id) => openPrompt(renamePrompt(c, id))} />
         <div className="stage">
-          <CanvasView c={c} vp={vp} tool={tool} grid={prefs.grid} axes={prefs.axes} snap={prefs.snap} theme={prefs.theme}
-            selected={selected} onSelect={setSelected} commit={commit}
+          <CanvasView c={c} vp={vp} tool={tool} grid={prefs.grid && !prefs.rc} axes={prefs.axes && !prefs.rc} snap={prefs.snap && !prefs.rc} theme={prefs.theme}
+            selected={replay !== null ? steps[replay - 1]?.id ?? null : selected} onSelect={setSelected} commit={commit}
+            hiddenIds={hiddenIds} frozen={replay !== null}
             onAsk={toolAsk}
-            measures={prefs.measures}
+            measures={prefs.rc || replay !== null ? NO_MEASURES : prefs.measures}
             edgePick={edgePick ? (edge) => {
               const spec = edgePick;
               setEdgePick(null);
@@ -316,9 +332,20 @@ export function App() {
               else setMenu2({ x: info.client.x, y: info.client.y, ...buildMenu(c, info) });
             }}
             onSketch={(summary, stroke, shape) => setSketch({ summary, stroke, shape })} />
-          <div className="hint">
-            {edgePick ? <><b>Côtés égaux</b><span>{edgePick.hint} (Échap pour annuler)</span></> : <><b>{tool.label}</b><span>{hint}</span></>}
-          </div>
+          {replay === null && <div className="hint">
+            {edgePick ? <><b>Côtés égaux</b><span>{edgePick.hint} (Échap pour annuler)</span></> : <><b>{(prefs.rc && RC_TOOLS.find(([id]) => id === tool.id)?.[1]) || tool.label}</b><span>{hint}</span></>}
+          </div>}
+          {replay !== null && steps.length > 0 && (
+            <div className="replay-bar">
+              <button className="icon-btn" data-tip="Début" onClick={() => { setPlaying(false); setReplay(1); }}><Icon name="prev" size={18} /></button>
+              <button className="icon-btn" data-tip="Étape précédente" onClick={() => { setPlaying(false); setReplay(Math.max(1, replay - 1)); }}><Icon name="back" size={18} /></button>
+              <button className="icon-btn on" data-tip={playing ? 'Pause' : 'Lecture'} onClick={() => { if (!playing && replay >= steps.length) setReplay(1); setPlaying(!playing); }}><Icon name={playing ? 'pause' : 'play'} size={18} /></button>
+              <button className="icon-btn" data-tip="Étape suivante" onClick={() => { setPlaying(false); setReplay(Math.min(steps.length, replay + 1)); }}><Icon name="fwd" size={18} /></button>
+              <button className="icon-btn" data-tip="Fin" onClick={() => { setPlaying(false); setReplay(steps.length); }}><Icon name="next" size={18} /></button>
+              <div className="replay-text"><b>Étape {replay}/{steps.length}</b><span>{stepText(c, steps[replay - 1])}</span></div>
+              <button className="btn small" onClick={() => { setPlaying(false); setReplay(null); }}>Quitter</button>
+            </div>
+          )}
           {toast && <div className="toast">{toast}</div>}
           {sketch && !toast && (
             <div className="sketch-bar">
@@ -337,16 +364,18 @@ export function App() {
               onPickEdge={(p) => setEdgePick(p)} />
           )}
           <div className="zoom">
-            <button className={`icon-btn ${prefs.grid ? 'on' : ''}`} data-tip="Grille" onClick={() => setPref('grid', !prefs.grid)}><Icon name="grid" size={18} /></button>
-            <button className={`icon-btn ${prefs.axes ? 'on' : ''}`} data-tip="Axes" onClick={() => setPref('axes', !prefs.axes)}><Icon name="axes" size={18} /></button>
-            <button className={`icon-btn ${prefs.snap ? 'on' : ''}`} data-tip="Aimanter à la grille" onClick={() => setPref('snap', !prefs.snap)}><Icon name="magnet" size={18} /></button>
-            <button className={`icon-btn ${measureMenu ? 'on' : ''}`} data-tip={measureMenu ? undefined : 'Mesures affichées'} onClick={() => setMeasureMenu(!measureMenu)}><Icon name="ruler" size={18} /></button>
-            <span className="hsep" />
+            {!prefs.rc && <>
+              <button className={`icon-btn ${prefs.grid ? 'on' : ''}`} data-tip="Grille" onClick={() => setPref('grid', !prefs.grid)}><Icon name="grid" size={18} /></button>
+              <button className={`icon-btn ${prefs.axes ? 'on' : ''}`} data-tip="Axes" onClick={() => setPref('axes', !prefs.axes)}><Icon name="axes" size={18} /></button>
+              <button className={`icon-btn ${prefs.snap ? 'on' : ''}`} data-tip="Aimanter à la grille" onClick={() => setPref('snap', !prefs.snap)}><Icon name="magnet" size={18} /></button>
+              <button className={`icon-btn ${measureMenu ? 'on' : ''}`} data-tip={measureMenu ? undefined : 'Mesures affichées'} onClick={() => setMeasureMenu(!measureMenu)}><Icon name="ruler" size={18} /></button>
+              <span className="hsep" />
+            </>}
             <button className="icon-btn" data-tip="Zoom +" onClick={() => zoom(1.25)}><Icon name="plus" size={18} /></button>
             <button className="icon-btn" data-tip="Zoom −" onClick={() => zoom(0.8)}><Icon name="minus" size={18} /></button>
             <button className="icon-btn" data-tip="Vue initiale" onClick={resetView}><Icon name="home" size={18} /></button>
           </div>
-          {measureMenu && (
+          {measureMenu && !prefs.rc && (
             <div className="measure-pop">
               <div className="ctx-title">Mesures sur la figure</div>
               {([
@@ -383,8 +412,7 @@ export function App() {
             </div>
           )}
         </div>
-        {prefs.ai && <AiPanel c={c} commit={commit} onClose={() => setPref('ai', false)} onFigure={ensureVisible} />}
-      </main>
+              </main>
     </div>
   );
 }
