@@ -21,6 +21,8 @@ export interface DrawOptions {
   /** Mesures écrites sur la figure (longueurs, angles, codages) et valeur survolée. */
   measures?: Measures;
   hoverLabel?: string | null;
+  /** Point dont le nom est survolé (il se modifie d'un clic). */
+  hoverName?: string | null;
   preview?: (ctx: CanvasRenderingContext2D, tw: (p: Vec) => Vec) => void;
 }
 
@@ -132,7 +134,8 @@ export function draw(ctx: CanvasRenderingContext2D, c: Construction, vp: Viewpor
         if (!free) { ctx.beginPath(); ctx.arc(s.x, s.y, 1.6, 0, Math.PI * 2); ctx.fillStyle = obj.color; ctx.fill(); }
         ctx.restore();
         ctx.save();
-        labelAt(ctx, th, obj.name, { x: s.x + 9, y: s.y - 10 }, th.label);
+        const nb = obj.noName ? null : nameBox(c, vp, obj);
+        if (nb) labelAt(ctx, th, obj.name, { x: nb.cx - nb.tw / 2, y: nb.cy }, th.label, o.hoverName === obj.id || o.selected.has(obj.id));
       }
       ctx.restore();
     }
@@ -253,10 +256,87 @@ function drawAngle(ctx: CanvasRenderingContext2D, vp: Viewport, th: Theme, obj: 
   pill(ctx, th, `${obj.name} = ${G.fmt(deg, 1)}°`, { x: B.x + Math.cos(m) * (r + 26), y: B.y + Math.sin(m) * (r + 22) }, obj.color);
 }
 
-function labelAt(ctx: CanvasRenderingContext2D, th: Theme, text: string, p: Vec, color: string) {
-  ctx.font = '600 15px Inter, system-ui, sans-serif';
+const NAME_FONT = '600 15px Inter, system-ui, sans-serif';
+let measurer: CanvasRenderingContext2D | null = null;
+function nameWidth(text: string) {
+  measurer ??= document.createElement('canvas').getContext('2d')!;
+  measurer.font = NAME_FONT;
+  return measurer.measureText(text).width;
+}
+
+/** Points reliés à `id` par un segment ou un côté de polygone. */
+function neighbours(c: Construction, id: string): string[] {
+  const out = new Set<string>();
+  for (const o of c.objects) {
+    if (!o.visible) continue;
+    const d = o.def;
+    if (d.k === 'segment') { if (d.a === id) out.add(d.b); else if (d.b === id) out.add(d.a); }
+    else if (d.k === 'polygon') {
+      const i = d.pts.indexOf(id), n = d.pts.length;
+      if (i >= 0) { out.add(d.pts[(i + n - 1) % n]); out.add(d.pts[(i + 1) % n]); }
+    }
+  }
+  return [...out];
+}
+
+export interface NameBox { cx: number; cy: number; tw: number }
+
+/** Où s'écrit le nom d'un point : à l'extérieur de la figure (côté opposé aux segments qui y arrivent), sauf si l'utilisateur l'a déplacé. */
+export function nameBox(c: Construction, vp: Viewport, obj: GeoObject): NameBox | null {
+  const P = c.comp(obj.id)?.pt;
+  if (!P) return null;
+  const s = vp.toScreen(P);
+  const tw = nameWidth(obj.name);
+  if (obj.labelOff) return { cx: s.x + obj.labelOff.x, cy: s.y + obj.labelOff.y, tw };
+  let ux = 0, uy = 0, first: Vec | null = null;
+  for (const nb of neighbours(c, obj.id)) {
+    const q = c.comp(nb)?.pt;
+    if (!q) continue;
+    const t = vp.toScreen(q);
+    const v = { x: t.x - s.x, y: t.y - s.y }, L = Math.hypot(v.x, v.y);
+    if (L < 1e-6) continue;
+    ux += v.x / L; uy += v.y / L;
+    first ??= { x: v.x / L, y: v.y / L };
+  }
+  let dir = { x: 0.75, y: -0.66 };
+  if (first) {
+    const m = Math.hypot(ux, uy);
+    if (m >= 0.3) dir = { x: -ux / m, y: -uy / m };
+    else {
+      // côtés alignés : le nom se met sur le côté, plutôt vers le haut
+      dir = { x: first.y, y: -first.x };
+      if (dir.y > 0) dir = { x: -dir.x, y: -dir.y };
+    }
+  }
+  const dist = 10 + (tw / 2) * Math.abs(dir.x) + 8 * Math.abs(dir.y);
+  return { cx: s.x + dir.x * dist, cy: s.y + dir.y * dist, tw };
+}
+
+/** Point dont le nom est sous le curseur. */
+export function hitName(c: Construction, vp: Viewport, s: Vec): string | null {
+  for (let i = c.objects.length - 1; i >= 0; i--) {
+    const o = c.objects[i];
+    if (!o.visible || o.noName || o.aux || o.type !== 'point') continue;
+    const b = nameBox(c, vp, o);
+    if (b && Math.abs(s.x - b.cx) <= b.tw / 2 + 5 && Math.abs(s.y - b.cy) <= 12) return o.id;
+  }
+  return null;
+}
+
+function labelAt(ctx: CanvasRenderingContext2D, th: Theme, text: string, p: Vec, color: string, active = false) {
+  ctx.font = NAME_FONT;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
+  if (active) {
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.16;
+    ctx.fillStyle = th.select;
+    ctx.beginPath();
+    ctx.roundRect(p.x - 5, p.y - 12, ctx.measureText(text).width + 10, 24, 7);
+    ctx.fill();
+    ctx.restore();
+  }
   ctx.lineWidth = 4;
   ctx.strokeStyle = th.bg;
   ctx.shadowBlur = 0;

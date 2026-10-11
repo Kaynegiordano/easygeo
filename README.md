@@ -39,6 +39,15 @@ quand on règle les autres côtés ou qu'on déplace des points (`src/engine/sol
 Clic droit sur la valeur : modifier, libérer, « même longueur qu'un autre côté… ». Un réglage impossible (inégalité triangulaire)
 est refusé sans rien modifier. Seuls les points libres sont déplacés ; un verrou sur un point construit n'est pas pris en charge.
 
+## Noms des points et confort
+
+- Clic sur le nom d'un point (ou double-clic sur le point, ou double-clic sur son nom dans la liste, ou F2 sur un point sélectionné) : on le renomme.
+  **Tab** valide et passe au point suivant (Maj+Tab : précédent) : pratique pour nommer toute une figure. Une minuscule devient une majuscule ;
+  si le nom est déjà pris par un autre point, les deux points **échangent** leurs noms.
+- Les noms se placent automatiquement **à l'extérieur** de la figure (côté opposé aux segments) ; on peut les **glisser** où l'on veut
+  (clic droit sur le point : « Replacer le nom », « Masquer le nom »).
+- Flèches du clavier : déplacent finement le point sélectionné (0,5 ; Maj = 0,1), un seul Ctrl+Z annule la série.
+
 ## Dessin à main levée
 
 Outil « Main levée » (crayon) : un tracé est reconnu par calcul (`src/engine/sketch.ts`) → point, segment, ligne brisée, polygone ou cercle.

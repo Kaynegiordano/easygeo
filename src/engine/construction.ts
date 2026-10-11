@@ -41,6 +41,10 @@ export interface GeoObject {
   visible: boolean;
   /** Objet auxiliaire créé implicitement (ex. droite (AB) pour une perpendiculaire). */
   aux?: boolean;
+  /** Position du nom d'un point par rapport au point (pixels), quand l'utilisateur l'a déplacé. */
+  labelOff?: { x: number; y: number };
+  /** Nom du point non affiché sur la figure. */
+  noName?: boolean;
 }
 
 export interface Computed {

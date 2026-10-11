@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { COLORS, type Construction } from './engine/construction';
 import { displayName } from './engine/describe';
-import { parseNumber, releaseLock, setAngle, setCoords, setEqualLength, setLength, setRadius, vertexOf } from './engine/edit';
+import { parseNumber, releaseLock, renameObject, setAngle, setCoords, setEqualLength, setLength, setRadius, vertexOf } from './engine/edit';
 import { findLenLock } from './engine/solve';
 import * as G from './engine/geom';
 import type { Vec } from './engine/geom';
@@ -23,7 +23,39 @@ export interface PickInfo {
 /** Choix d'un second côté : l'application passe en mode « clique sur un côté ». */
 export interface EdgePick { hint: string; apply: (edge: [string, string]) => void }
 
-export interface PromptSpec { label: string; value: string; suffix?: string; apply: (v: string) => void }
+export interface PromptSpec {
+  label: string;
+  value: string;
+  suffix?: string;
+  /** Applique la saisie ; peut renvoyer un message à afficher. */
+  apply: (v: string) => string | void;
+  /** Petite aide sous la saisie. */
+  hint?: string;
+  /** Objet à mettre en évidence pendant la saisie. */
+  focus?: string;
+  /** Saisie suivante (Tab) ou précédente (Maj+Tab). */
+  next?: (dir: 1 | -1) => PromptSpec | null;
+}
+
+/** Saisie du nom d'un objet. Pour un point, Tab passe au point suivant (pratique pour nommer toute une figure). */
+export function renamePrompt(c: Construction, id: string): PromptSpec {
+  const o = c.get(id)!;
+  const isPoint = o.type === 'point';
+  const cycle = (dir: 1 | -1): PromptSpec | null => {
+    const pts = c.objects.filter((x) => x.type === 'point' && x.visible && !x.aux);
+    const i = pts.findIndex((x) => x.id === id);
+    if (i < 0 || pts.length < 2) return null;
+    return renamePrompt(c, pts[(i + dir + pts.length) % pts.length].id);
+  };
+  return {
+    label: isPoint ? `Nom du point ${o.name}` : `Nouveau nom pour ${o.name}`,
+    value: o.name,
+    focus: id,
+    hint: isPoint ? 'Tab : point suivant · Entrée : valider' : undefined,
+    next: isPoint ? cycle : undefined,
+    apply: (v) => renameObject(c, id, v),
+  };
+}
 
 export interface MenuItem {
   label: string;
@@ -92,7 +124,11 @@ function common(c: Construction, id: string): MenuItem[] {
   return [
     { label: '', sep: true },
     { label: 'Couleur', colors: (col) => { o.color = col; } },
-    { label: 'Renommer…', prompt: { label: `Nouveau nom pour ${o.name}`, value: o.name, apply: (v) => c.rename(id, v.trim()) } },
+    { label: 'Renommer…', prompt: renamePrompt(c, id) },
+    ...(o.type === 'point' ? [
+      { label: o.noName ? 'Afficher le nom' : 'Masquer le nom', run: () => { o.noName = o.noName ? undefined : true; } },
+      ...(o.labelOff ? [{ label: 'Replacer le nom', run: () => { delete o.labelOff; } }] : []),
+    ] : []),
     { label: 'Masquer', run: () => { o.visible = false; } },
     { label: 'Supprimer', danger: true, run: () => c.remove(id) },
   ];
@@ -198,6 +234,9 @@ function polygonItems(c: Construction, polyId: string): MenuItem[] {
 
 /** Action principale au double-clic : la valeur la plus naturelle à modifier. */
 export function primaryEdit(c: Construction, info: PickInfo): PromptSpec | null {
+  // Un point : on change son nom (les coordonnées restent dans le menu du clic droit).
+  const o = info.label ? undefined : c.get(info.hit ?? '');
+  if (o?.type === 'point' && !info.edge) return renamePrompt(c, o.id);
   const { items } = buildMenu(c, info);
   return items.find((i) => i.prompt)?.prompt ?? null;
 }

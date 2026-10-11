@@ -106,6 +106,28 @@ export function setCoords(c: Construction, id: string, x: number, y: number) {
   else if (!moveFreePoint(c, id, { x, y })) throw new Error('Cette position est impossible avec les mesures imposées.');
 }
 
+/**
+ * Renomme un objet. Un point reçoit une majuscule (« a » → « A ») ; si le nom est déjà pris par un autre point,
+ * les deux points échangent leurs noms. Renvoie un message à afficher, le cas échéant.
+ */
+export function renameObject(c: Construction, id: string, raw: string): string | undefined {
+  const o = c.get(id);
+  if (!o) return;
+  let name = raw.trim().replace(/’/g, "'");
+  if (!name) throw new Error('Écris un nom.');
+  if (!/^\p{L}[\p{L}\d_']*$/u.test(name)) throw new Error("Un nom commence par une lettre, sans espace ni symbole : A, B', M1…");
+  if (o.type === 'point' && /^\p{Ll}['\d_]*$/u.test(name)) name = name[0].toUpperCase() + name.slice(1);
+  if (name === o.name) return;
+  const other = c.objects.find((x) => x.name === name && x.id !== id);
+  if (other) {
+    if (o.type !== 'point' || other.type !== 'point') throw new Error(`Le nom « ${name} » est déjà utilisé.`);
+    other.name = o.name;
+    o.name = name;
+    return `« ${name} » était déjà pris : les points ${o.name} et ${other.name} ont échangé leurs noms.`;
+  }
+  c.rename(id, name);
+}
+
 /** Lit un nombre écrit à la française (« 4,5 », « 60° », « 5 cm »). */
 export function parseNumber(s: string): number {
   const n = Number(s.replace(/[°\s]|cm|unités?/gi, '').replace(',', '.'));

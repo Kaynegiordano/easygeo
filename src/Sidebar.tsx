@@ -10,13 +10,15 @@ interface Props {
   selected: string | null;
   onSelect: (id: string | null) => void;
   commit: () => void;
+  /** Double-clic sur un nom de la liste : le renommer. */
+  onRename?: (id: string) => void;
 }
 
 const TYPE_LABEL: Record<string, string> = {
   point: 'Points', line: 'Lignes', circle: 'Cercles', polygon: 'Polygones', function: 'Fonctions', number: 'Nombres & mesures',
 };
 
-export function Sidebar({ c, selected, onSelect, commit }: Props) {
+export function Sidebar({ c, selected, onSelect, commit, onRename }: Props) {
   const runner = useMemo(() => new CommandRunner(c), [c]);
   const [input, setInput] = useState('');
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
@@ -86,7 +88,7 @@ export function Sidebar({ c, selected, onSelect, commit }: Props) {
                     onClick={(e) => { e.stopPropagation(); commit(); o.visible = !o.visible; c.changed(); }} />
                   <div className="obj-body">
                     <div className="obj-line">
-                      <span className="obj-name">{def.k === 'function' ? `${o.name}(x)` : dn}</span>
+                      <span className="obj-name" title="Double-clic pour renommer" onDoubleClick={(e) => { e.stopPropagation(); onRename?.(o.id); }}>{def.k === 'function' ? `${o.name}(x)` : dn}</span>
                       <span className="obj-val">{valueText(c, o)}</span>
                     </div>
                     {def.k === 'slider' ? (

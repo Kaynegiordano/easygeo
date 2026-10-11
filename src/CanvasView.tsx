@@ -1,7 +1,7 @@
 // Zone de dessin : rendu, outils à la souris, déplacement, zoom.
 import { useEffect, useRef } from 'react';
 import type { Construction } from './engine/construction';
-import { draw, hitTest, type Theme, type Viewport } from './engine/render';
+import { draw, hitName, hitTest, nameBox, type Theme, type Viewport } from './engine/render';
 import { accepts, type Tool } from './engine/tools';
 import * as G from './engine/geom';
 import { applyShape, recognize, type Shape } from './engine/sketch';
@@ -32,6 +32,8 @@ interface Props {
   measures: MeasureOpts;
   /** Clic sur une valeur écrite sur la figure (longueur, angle) : la modifier. */
   onEditLabel: (label: MLabel, client: Vec) => void;
+  /** Clic sur le nom d'un point : le renommer. */
+  onEditName: (id: string, client: Vec) => void;
   /** Mode « choisis un côté » (pour « même longueur que… ») : reçoit le côté cliqué, ou null. */
   edgePick: ((edge: [string, string] | null) => void) | null;
   /** Clic droit sans glisser. */
@@ -46,8 +48,10 @@ type Drag =
   | { kind: 'pan'; last: Vec; start: Vec; moved: boolean; right: boolean }
   | { kind: 'point'; id: string; moved: boolean }
   | { kind: 'group'; ids: string[]; start: Vec; orig: Vec[]; moved: boolean }
-  | { kind: 'ink'; pts: Vec[]; lab: MLabel | null }
-  | { kind: 'label'; lab: MLabel; start: Vec };
+  | { kind: 'ink'; pts: Vec[]; lab: MLabel | null; name: string | null }
+  | { kind: 'label'; lab: MLabel; start: Vec }
+  /** Nom d'un point : un clic le modifie, un glissement le déplace. */
+  | { kind: 'name'; id: string; grab: Vec; start: Vec; moved: boolean };
 
 function readTheme(): Theme {
   const s = getComputedStyle(document.documentElement);
@@ -65,6 +69,7 @@ export function CanvasView(p: Props) {
     drag: null as Drag | null,
     hover: null as string | null,
     hoverLabel: null as string | null,
+    hoverName: null as string | null,
     mouse: null as Vec | null,
     theme: readTheme(),
     raf: 0,
@@ -96,6 +101,7 @@ export function CanvasView(p: Props) {
       hover: s.hover,
       measures: collectMeasures(c, vp, props.current.measures),
       hoverLabel: s.hoverLabel,
+      hoverName: s.hoverName,
       preview: s.mouse ? (cx) => preview(cx, c, vp, tool, s.pending, s.mouse!, s.theme) : undefined,
     });
     // Encre du tracé à main levée en cours
@@ -260,8 +266,18 @@ export function CanvasView(p: Props) {
     // Une valeur écrite sur la figure se modifie d'un clic (avec Déplacer ou Main levée).
     const lab = tool.id === 'move' || tool.id === 'freehand' ? hitMeasure(collectMeasures(c, vp, props.current.measures), s) : null;
 
+    // Le nom d'un point (s'il n'y a pas de point juste dessous) : clic = renommer, glissement = déplacer.
+    const onPoint = hits.some((h) => c.get(h)?.type === 'point');
+    const nameId = (tool.id === 'move' || tool.id === 'freehand') && !onPoint && !lab ? hitName(c, vp, s) : null;
+
     if (tool.id === 'move') {
       if (lab) { S.drag = { kind: 'label', lab, start: s }; return; }
+      if (nameId) {
+        const nb = nameBox(c, vp, c.get(nameId)!)!;
+        S.drag = { kind: 'name', id: nameId, grab: { x: nb.cx - s.x, y: nb.cy - s.y }, start: s, moved: false };
+        onSelect(nameId);
+        return;
+      }
       const h = hits[0];
       onSelect(h ?? null);
       const o = h ? c.get(h) : undefined;
@@ -273,7 +289,7 @@ export function CanvasView(p: Props) {
       return;
     }
 
-    if (tool.id === 'freehand') { S.drag = { kind: 'ink', pts: [s], lab }; requestDraw(); return; }
+    if (tool.id === 'freehand') { S.drag = { kind: 'ink', pts: [s], lab, name: nameId }; requestDraw(); return; }
 
     if (tool.id === 'delete') {
       if (hits[0]) { props.current.commit(); c.remove(hits[0]); c.changed(); onSelect(null); }
@@ -304,6 +320,17 @@ export function CanvasView(p: Props) {
     S.mouse = vp.toWorld(s);
     const d = S.drag;
 
+    if (d?.kind === 'name') {
+      if (!d.moved && G.dist(s, d.start) <= 4) return;
+      if (!d.moved) { props.current.commit(); d.moved = true; }
+      const P = c.comp(d.id)?.pt;
+      if (P) {
+        const ps = vp.toScreen(P);
+        c.get(d.id)!.labelOff = { x: Math.round(s.x + d.grab.x - ps.x), y: Math.round(s.y + d.grab.y - ps.y) };
+      }
+      c.changed();
+      return;
+    }
     if (d?.kind === 'label') {
       // Un glissement sur une valeur ne la modifie pas : on déplace la vue.
       if (G.dist(s, d.start) > 5) S.drag = { kind: 'pan', last: d.start, start: d.start, moved: true, right: false };
@@ -357,7 +384,9 @@ export function CanvasView(p: Props) {
       S.hover = h;
       const lab = tool.id === 'move' || tool.id === 'freehand' ? hitMeasure(collectMeasures(c, vp, props.current.measures), s) : null;
       S.hoverLabel = lab?.key ?? null;
-      canvasRef.current!.style.cursor = props.current.edgePick ? 'crosshair' : lab ? 'text' : tool.id === 'move' ? (h ? 'grab' : 'default') : tool.id === 'delete' ? (h ? 'pointer' : 'default') : 'crosshair';
+      const nm = (tool.id === 'move' || tool.id === 'freehand') && !lab && !hits.some((x) => c.get(x)?.type === 'point') ? hitName(c, vp, s) : null;
+      S.hoverName = nm;
+      canvasRef.current!.style.cursor = props.current.edgePick ? 'crosshair' : lab || nm ? 'text' : tool.id === 'move' ? (h ? 'grab' : 'default') : tool.id === 'delete' ? (h ? 'pointer' : 'default') : 'crosshair';
     }
     requestDraw();
   };
@@ -367,11 +396,13 @@ export function CanvasView(p: Props) {
     st.current.drag = null;
     if (d?.kind === 'pan' && d.right && !d.moved) { props.current.onContext(pick(e)); return; }
     if (d?.kind === 'label') { props.current.onEditLabel(d.lab, { x: e.clientX, y: e.clientY }); return; }
+    if (d?.kind === 'name') { if (!d.moved) props.current.onEditName(d.id, { x: e.clientX, y: e.clientY }); requestDraw(); return; }
     if (d?.kind === 'ink') {
       const { c, vp, snap, commit, onError, onSketch } = props.current;
       const shape = recognize(d.pts);
       // Simple tap sur une valeur écrite : on la modifie au lieu de créer un point.
       if (d.lab && shape.kind === 'point') { props.current.onEditLabel(d.lab, { x: e.clientX, y: e.clientY }); requestDraw(); return; }
+      if (d.name && shape.kind === 'point') { props.current.onEditName(d.name, { x: e.clientX, y: e.clientY }); requestDraw(); return; }
       // Un simple « tap » sur un objet existant ne crée rien (il sert au double-clic).
       if (shape.kind === 'point' && pick(e).hit) { requestDraw(); return; }
       commit();
@@ -400,7 +431,7 @@ export function CanvasView(p: Props) {
     requestDraw();
   };
 
-  const onLeave = () => { st.current.mouse = null; st.current.hover = null; st.current.hoverLabel = null; requestDraw(); };
+  const onLeave = () => { st.current.mouse = null; st.current.hover = null; st.current.hoverLabel = null; st.current.hoverName = null; requestDraw(); };
 
   return (
     <canvas

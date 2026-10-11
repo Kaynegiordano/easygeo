@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Construction, type Snapshot } from './engine/construction';
-import { Viewport } from './engine/render';
+import { nameBox, Viewport } from './engine/render';
 import { GROUPS, TOOLS, toolById, type Tool } from './engine/tools';
 import { CanvasView } from './CanvasView';
 import { Sidebar } from './Sidebar';
 import { AiPanel } from './AiPanel';
 import { Icon } from './icons';
-import { buildMenu, ContextMenu, labelPrompt, primaryEdit, type EdgePick, type MenuItem, type PromptSpec } from './ContextMenu';
+import { moveFreePoint } from './engine/solve';
+import { buildMenu, ContextMenu, labelPrompt, primaryEdit, renamePrompt, type EdgePick, type MenuItem, type PromptSpec } from './ContextMenu';
 import { collectMeasures, DEFAULT_MEASURES, type MeasureOpts } from './engine/labels';
 import { alternatives, applyShape, recognize, type Shape, type ShapeKind } from './engine/sketch';
 import type { Vec } from './engine/geom';
@@ -45,7 +46,9 @@ export function App() {
   const [pendingCount, setPendingCount] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   /** Petite saisie (rayon, longueur, angle…) affichée près du curseur ou en haut du dessin. */
-  const [ask, setAsk] = useState<(PromptSpec & { x?: number; y?: number }) | null>(null);
+  const [ask, setAsk] = useState<(PromptSpec & { x?: number; y?: number; orig?: string; seq?: number }) | null>(null);
+  const askSeq = useRef(0);
+  const nudgeAt = useRef(0);
   const [menu2, setMenu2] = useState<{ x: number; y: number; title: string; items: MenuItem[] } | null>(null);
   /** Mode « clique sur un côté » (même longueur que…). */
   const [edgePick, setEdgePick] = useState<EdgePick | null>(null);
@@ -105,6 +108,23 @@ export function App() {
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selected && !typing) {
         commit(); c.remove(selected); c.changed(); setSelected(null);
       }
+      else if (e.key === 'F2' && selected && c.get(selected) && !typing) { e.preventDefault(); openPrompt(renamePrompt(c, selected)); }
+      else if (e.key.startsWith('Arrow') && selected && !typing && !ask && !menu2) {
+        // Flèches : déplacent finement le point sélectionné (Maj = très fin).
+        const o = c.get(selected);
+        const p = o?.def.k === 'free' ? c.comp(o.id)?.pt : undefined;
+        if (o && p) {
+          e.preventDefault();
+          const step = e.shiftKey ? 0.1 : 0.5;
+          const dx = e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0;
+          const dy = e.key === 'ArrowUp' ? step : e.key === 'ArrowDown' ? -step : 0;
+          if (Date.now() - nudgeAt.current > 900) commit();
+          nudgeAt.current = Date.now();
+          const r = (v: number) => Math.round(v * 1e4) / 1e4;
+          moveFreePoint(c, o.id, { x: r(p.x + dx), y: r(p.y + dy) });
+          c.changed();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -123,13 +143,27 @@ export function App() {
   };
   const runAsk = () => {
     if (!ask) return;
-    if (act(() => ask.apply(ask.value))) setAsk(null);
+    const out: { msg?: string } = {};
+    if (act(() => { out.msg = ask.apply(ask.value) ?? undefined; })) { setAsk(null); if (out.msg) setToast(out.msg); }
+  };
+  /** Tab / Maj+Tab dans une saisie de nom : valide et passe au point suivant / précédent. */
+  const askStep = (dir: 1 | -1) => {
+    if (!ask?.next) return;
+    const cur = ask, at = cur.x !== undefined ? { x: cur.x, y: cur.y! } : undefined;
+    const nxt = cur.next!(dir);
+    const out: { msg?: string } = {};
+    if (cur.value !== cur.orig && !act(() => { out.msg = cur.apply(cur.value) ?? undefined; })) return;
+    if (out.msg) setToast(out.msg);
+    if (nxt) openPrompt(nxt, at); else setAsk(null);
   };
   const toolAsk = (t: Tool, ids: string[]) => setAsk({
     label: t.ask!.label, value: t.ask!.default, suffix: t.ask!.suffix,
     apply: (v) => t.run?.(c, ids, v),
   });
-  const openPrompt = (p: PromptSpec, at?: Vec) => setAsk({ ...p, x: at?.x, y: at?.y });
+  const openPrompt = (p: PromptSpec, at?: Vec) => {
+    if (p.focus) setSelected(p.focus);
+    setAsk({ ...p, x: at?.x, y: at?.y, orig: p.value, seq: ++askSeq.current });
+  };
 
   /** Réinterprète le dernier tracé (bouton « C'était plutôt… »). */
   const reinterpret = (kind: ShapeKind) => {
@@ -209,7 +243,7 @@ export function App() {
   // Accès pour les tests automatiques (activé par localStorage « easygeo.debug » = 1).
   try {
     if (localStorage.getItem('easygeo.debug') === '1') {
-      (window as unknown as Record<string, unknown>).__easygeo = { c, vp, labels: () => collectMeasures(c, vp, prefs.measures) };
+      (window as unknown as Record<string, unknown>).__easygeo = { c, vp, labels: () => collectMeasures(c, vp, prefs.measures), names: () => c.objects.filter((o) => o.type === 'point').map((o) => ({ id: o.id, name: o.name, box: nameBox(c, vp, o), pt: c.comp(o.id)?.pt })) };
     }
   } catch { /* stockage indisponible */ }
 
@@ -260,7 +294,7 @@ export function App() {
       </header>
 
       <main className="main">
-        <Sidebar c={c} selected={selected} onSelect={setSelected} commit={commit} />
+        <Sidebar c={c} selected={selected} onSelect={setSelected} commit={commit} onRename={(id) => openPrompt(renamePrompt(c, id))} />
         <div className="stage">
           <CanvasView c={c} vp={vp} tool={tool} grid={prefs.grid} axes={prefs.axes} snap={prefs.snap} theme={prefs.theme}
             selected={selected} onSelect={setSelected} commit={commit}
@@ -273,6 +307,7 @@ export function App() {
               act(() => spec.apply(edge));
             } : null}
             onEditLabel={(l, at) => { setMenu2(null); openPrompt(labelPrompt(c, l, prefs.measures.unit), at); }}
+            onEditName={(id, at) => { setMenu2(null); openPrompt(renamePrompt(c, id), at); }}
             onPending={setPendingCount} onError={setToast} cancelToken={cancelToken}
             onContext={(info) => { setAsk(null); setMenu2({ x: info.client.x, y: info.client.y, ...buildMenu(c, info) }); }}
             onEdit={(info) => {
@@ -331,12 +366,16 @@ export function App() {
           {ask && (
             <div className={`ask ${ask.x !== undefined ? 'at' : ''}`}
               style={ask.x !== undefined ? { left: Math.min(ask.x + 8, window.innerWidth - 340), top: Math.min(ask.y! + 8, window.innerHeight - 170) } : undefined}
-              onKeyDown={(e) => { if (e.key === 'Enter') runAsk(); }}>
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') runAsk();
+                else if (e.key === 'Tab' && ask.next) { e.preventDefault(); askStep(e.shiftKey ? -1 : 1); }
+              }}>
               <label>{ask.label}</label>
               <div className="ask-row">
-                <input autoFocus value={ask.value} onChange={(e) => setAsk({ ...ask, value: e.target.value })} onFocus={(e) => e.target.select()} />
+                <input key={ask.seq} autoFocus value={ask.value} onChange={(e) => setAsk({ ...ask, value: e.target.value })} onFocus={(e) => e.target.select()} />
                 {ask.suffix && <span>{ask.suffix}</span>}
               </div>
+              {ask.hint && <div className="ask-hint">{ask.hint}</div>}
               <div className="ask-actions">
                 <button className="btn" onClick={() => setAsk(null)}>Annuler</button>
                 <button className="btn primary" onClick={runAsk}>Valider</button>

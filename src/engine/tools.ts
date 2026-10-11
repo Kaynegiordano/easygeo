@@ -30,7 +30,7 @@ export const GROUPS = [
 const transform = (c: Construction, target: string, mk: Parameters<typeof imageOf>[2]) => imageOf(c, target, mk);
 
 export const TOOLS: Tool[] = [
-  { id: 'move', label: 'Déplacer', group: 'base', steps: [], hints: ['Fais glisser un point ou un objet. Double-clic : régler une mesure. Clic droit : options. Molette : zoom.'] },
+  { id: 'move', label: 'Déplacer', group: 'base', steps: [], hints: ['Fais glisser un point ou un objet. Clique sur un nom (ou double-clic sur un point) pour le changer, glisse un nom pour le déplacer. Clic droit : options. Molette : zoom.'] },
   { id: 'freehand', label: 'Main levée', group: 'base', steps: [], hints: ['Dessine (trait, triangle, carré, cercle…) : EasyGeo le met au propre. Double-clic sur un objet pour régler sa mesure, clic droit pour plus d’options.'] },
   { id: 'point', label: 'Point', group: 'base', steps: ['point'], hints: ['Clique pour placer un point (sur un objet : point mobile sur cet objet).'], run: () => {} },
   { id: 'midpoint', label: 'Milieu', group: 'base', steps: ['point', 'point'], hints: ['Clique sur le premier point.', 'Clique sur le second point.'],
