@@ -2,6 +2,8 @@
 
 Géométrie dynamique moderne pour le collège : simple, rapide, sans compte ni connexion. Tout fonctionne hors ligne.
 
+EasyGeo est une application autonome, indépendante de Kane OS. L’installateur Windows propose le dossier d’installation et crée ses propres raccourcis. Les figures et préférences existantes sont conservées lors d’une mise à jour ou d’une désinstallation.
+
 ## Lancer
 
 ```bash
