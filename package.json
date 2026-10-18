@@ -1,7 +1,7 @@
 {
   "name": "easygeo",
   "productName": "EasyGeo",
-  "version": "0.3.2",
+  "version": "1.0.0",
   "description": "Géométrie dynamique moderne pour le collège",
   "private": true,
   "type": "module",
